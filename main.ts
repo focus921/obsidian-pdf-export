@@ -12,11 +12,11 @@ const DEFAULT_SETTINGS: PDFExportSettings = {
 	includeTitle: true
 }
 
-// PDF预览模态框
 class PDFPreviewModal extends Modal {
 	private content: string;
 	private title: string;
 	private settings: PDFExportSettings;
+	private iframeEl: HTMLIFrameElement | null = null;
 
 	constructor(app: App, content: string, title: string, settings: PDFExportSettings) {
 		super(app);
@@ -25,102 +25,89 @@ class PDFPreviewModal extends Modal {
 		this.settings = settings;
 	}
 
-	onOpen() {
+	onOpen(): void {
 		const { contentEl, modalEl } = this;
 
-		// 设置模态框为全屏
 		modalEl.addClass('pdf-export-modal');
-		modalEl.style.width = '95vw';
-		modalEl.style.height = '95vh';
-		modalEl.style.maxWidth = '95vw';
-		modalEl.style.maxHeight = '95vh';
 
-		// 创建工具栏
 		const toolbar = contentEl.createDiv({ cls: 'pdf-export-toolbar' });
-		toolbar.style.cssText = `
-			padding: 10px;
-			background: #f0f0f0;
-			border-bottom: 1px solid #ddd;
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-		`;
 
-		// 左侧说明
-		const instructions = toolbar.createDiv();
-		instructions.innerHTML = Platform.isMobile
-			? `<strong>iOS 导出步骤：</strong><br>
-			   1. 点击下方"复制HTML"按钮<br>
-			   2. 在Safari中打开新标签页<br>
-			   3. 粘贴到地址栏并访问<br>
-			   4. 使用分享→打印→保存PDF`
-			: `<strong>桌面端：</strong> 点击"打印"按钮或按 Ctrl/Cmd+P`;
+		const instructions = toolbar.createDiv({ cls: 'pdf-export-instructions' });
 
-		// 右侧按钮
-		const buttons = toolbar.createDiv();
-		buttons.style.cssText = 'display: flex; gap: 10px;';
+		if (Platform.isMobile) {
+			const strong1 = instructions.createEl('strong');
+			strong1.setText('iOS export steps:');
+			instructions.createEl('br');
+			instructions.appendText('1. Click "Copy HTML" button below');
+			instructions.createEl('br');
+			instructions.appendText('2. Open Safari and paste URL');
+			instructions.createEl('br');
+			instructions.appendText('3. Use Share → Print → Save PDF');
+		} else {
+			const strong2 = instructions.createEl('strong');
+			strong2.setText('Desktop:');
+			instructions.appendText(' Click "Print" button or press Ctrl/Cmd+P');
+		}
 
-		// 复制HTML按钮（移动端主要使用）
-		const copyBtn = buttons.createEl('button', { text: '复制HTML' });
-		copyBtn.style.cssText = 'padding: 8px 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;';
-		copyBtn.onclick = () => {
-			const htmlContent = this.buildFullHTML();
-			const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent);
-			navigator.clipboard.writeText(dataUrl).then(() => {
-				new Notice('HTML数据URL已复制！在Safari中粘贴到地址栏访问');
-			}).catch(() => {
-				// 备选：复制纯HTML
-				navigator.clipboard.writeText(htmlContent).then(() => {
-					new Notice('HTML已复制到剪贴板');
-				});
+		const buttons = toolbar.createDiv({ cls: 'pdf-export-buttons' });
+
+		const copyBtn = buttons.createEl('button', {
+			text: 'Copy HTML',
+			cls: 'pdf-export-btn pdf-export-btn-copy'
+		});
+		copyBtn.addEventListener('click', () => {
+			this.copyHTML();
+		});
+
+		const printBtn = buttons.createEl('button', {
+			text: 'Print preview',
+			cls: 'pdf-export-btn pdf-export-btn-print'
+		});
+		printBtn.addEventListener('click', () => {
+			this.triggerPrint();
+		});
+
+		const closeBtn = buttons.createEl('button', {
+			text: 'Close',
+			cls: 'pdf-export-btn pdf-export-btn-close'
+		});
+		closeBtn.addEventListener('click', () => {
+			this.close();
+		});
+
+		const iframeContainer = contentEl.createDiv({ cls: 'pdf-export-iframe-container' });
+
+		this.iframeEl = iframeContainer.createEl('iframe', { cls: 'pdf-export-iframe' });
+		this.iframeEl.setAttribute('srcdoc', this.buildFullHTML());
+	}
+
+	private copyHTML(): void {
+		const htmlContent = this.buildFullHTML();
+		const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent);
+
+		navigator.clipboard.writeText(dataUrl)
+			.then(() => {
+				new Notice('HTML data URL copied! Paste in Safari address bar');
+			})
+			.catch(() => {
+				navigator.clipboard.writeText(htmlContent)
+					.then(() => {
+						new Notice('HTML copied to clipboard');
+					})
+					.catch((err) => {
+						console.error('Failed to copy:', err);
+						new Notice('Failed to copy HTML');
+					});
 			});
-		};
+	}
 
-		// 打印按钮
-		const printBtn = buttons.createEl('button', { text: '打印预览' });
-		printBtn.style.cssText = 'padding: 8px 16px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 4px;';
-		printBtn.onclick = () => this.triggerPrint();
-
-		// 关闭按钮
-		const closeBtn = buttons.createEl('button', { text: '关闭' });
-		closeBtn.style.cssText = 'padding: 8px 16px; cursor: pointer; background: #f44336; color: white; border: none; border-radius: 4px;';
-		closeBtn.onclick = () => this.close();
-
-		// 创建iframe容器
-		const iframeContainer = contentEl.createDiv();
-		iframeContainer.style.cssText = `
-			flex: 1;
-			overflow: hidden;
-			height: calc(95vh - 120px);
-		`;
-
-		// 创建iframe
-		const iframe = iframeContainer.createEl('iframe');
-		iframe.style.cssText = `
-			width: 100%;
-			height: 100%;
-			border: none;
-			background: white;
-		`;
-		iframe.id = 'pdf-preview-iframe';
-
-		// 写入内容到iframe
-		const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-		if (iframeDoc) {
-			iframeDoc.open();
-			iframeDoc.write(this.buildFullHTML());
-			iframeDoc.close();
+	private triggerPrint(): void {
+		if (this.iframeEl?.contentWindow) {
+			this.iframeEl.contentWindow.print();
 		}
 	}
 
-	triggerPrint() {
-		const iframe = document.getElementById('pdf-preview-iframe') as HTMLIFrameElement;
-		if (iframe && iframe.contentWindow) {
-			iframe.contentWindow.print();
-		}
-	}
-
-	buildFullHTML(): string {
+	private buildFullHTML(): string {
 		const fontSize = this.settings.fontSize;
 		const lineHeight = this.settings.lineHeight;
 		const includeTitle = this.settings.includeTitle;
@@ -130,7 +117,7 @@ class PDFPreviewModal extends Modal {
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>${this.title}</title>
+	<title>${this.escapeHTML(this.title)}</title>
 	<style>
 		* { box-sizing: border-box; }
 
@@ -244,32 +231,39 @@ class PDFPreviewModal extends Modal {
 	</style>
 </head>
 <body>
-	${includeTitle ? `<h1 class="document-title">${this.title}</h1>` : ''}
+	${includeTitle ? `<h1 class="document-title">${this.escapeHTML(this.title)}</h1>` : ''}
 	<div class="markdown-content">${this.content}</div>
 </body>
 </html>`;
 	}
 
-	onClose() {
+	private escapeHTML(text: string): string {
+		const div = document.createElement('div');
+		div.appendChild(document.createTextNode(text));
+		return div.innerHTML;
+	}
+
+	onClose(): void {
 		const { contentEl } = this;
 		contentEl.empty();
+		this.iframeEl = null;
 	}
 }
 
 export default class PDFExportPlugin extends Plugin {
 	settings: PDFExportSettings;
 
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
 
 		this.addCommand({
 			id: 'export-current-note-to-pdf',
-			name: '导出当前笔记为 PDF',
+			name: 'Export current note to PDF',
 			checkCallback: (checking: boolean) => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView) {
 					if (!checking) {
-						this.exportCurrentNoteToPDF();
+						void this.exportCurrentNoteToPDF();
 					}
 					return true;
 				}
@@ -282,10 +276,10 @@ export default class PDFExportPlugin extends Plugin {
 				if (file instanceof TFile && file.extension === 'md') {
 					menu.addItem((item) => {
 						item
-							.setTitle('导出为 PDF')
+							.setTitle('Export to PDF')
 							.setIcon('file-text')
-							.onClick(async () => {
-								await this.exportFileToPDF(file);
+							.onClick(() => {
+								void this.exportFileToPDF(file);
 							});
 					});
 				}
@@ -293,56 +287,50 @@ export default class PDFExportPlugin extends Plugin {
 		);
 
 		this.addSettingTab(new PDFExportSettingTab(this.app, this));
-
-		console.log('PDF Export Plugin loaded (Modal + Iframe Method)');
 	}
 
-	onunload() {
-		console.log('PDF Export Plugin unloaded');
-	}
-
-	async loadSettings() {
+	async loadSettings(): Promise<void> {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
 
-	async exportCurrentNoteToPDF() {
+	private async exportCurrentNoteToPDF(): Promise<void> {
 		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!activeView) {
-			new Notice('没有打开的笔记');
+			new Notice('No note is open');
 			return;
 		}
 
 		const file = activeView.file;
 		if (!file) {
-			new Notice('无法获取当前文件');
+			new Notice('Unable to get current file');
 			return;
 		}
 
 		await this.exportFileToPDF(file);
 	}
 
-	async exportFileToPDF(file: TFile) {
+	private async exportFileToPDF(file: TFile): Promise<void> {
 		try {
-			new Notice('正在准备 PDF 预览...');
+			new Notice('Preparing PDF preview...');
 
 			const content = await this.app.vault.read(file);
 			const renderedContent = await this.renderMarkdownToHTML(content);
 
-			// 打开预览模态框
 			const modal = new PDFPreviewModal(this.app, renderedContent, file.basename, this.settings);
 			modal.open();
 
 		} catch (error) {
 			console.error('PDF export error:', error);
-			new Notice('PDF 导出失败: ' + (error.message || '未知错误'), 10000);
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			new Notice('PDF export failed: ' + errorMessage, 10000);
 		}
 	}
 
-	async renderMarkdownToHTML(markdown: string): Promise<string> {
+	private async renderMarkdownToHTML(markdown: string): Promise<string> {
 		const container = document.createElement('div');
 		const component = new Component();
 		component.load();
@@ -375,14 +363,17 @@ class PDFExportSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'PDF 导出设置' });
+		new Setting(containerEl)
+			.setName('PDF export settings')
+			.setHeading();
+
 		containerEl.createEl('p', {
-			text: '此插件使用系统原生打印功能生成 PDF，无内存限制问题。'
+			text: 'This plugin uses system native print functionality to generate PDF, with no memory limitations.'
 		});
 
 		new Setting(containerEl)
-			.setName('字体大小')
-			.setDesc('PDF 中的基础字体大小（像素）')
+			.setName('Font size')
+			.setDesc('Base font size for PDF (pixels)')
 			.addSlider(slider => slider
 				.setLimits(10, 24, 1)
 				.setValue(this.plugin.settings.fontSize)
@@ -393,8 +384,8 @@ class PDFExportSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('行高')
-			.setDesc('文本行高倍数')
+			.setName('Line height')
+			.setDesc('Text line height multiplier')
 			.addSlider(slider => slider
 				.setLimits(1.2, 2.0, 0.1)
 				.setValue(this.plugin.settings.lineHeight)
@@ -405,8 +396,8 @@ class PDFExportSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('包含标题')
-			.setDesc('在 PDF 开头显示文档标题')
+			.setName('Include title')
+			.setDesc('Show document title at the top of PDF')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.includeTitle)
 				.onChange(async (value) => {
