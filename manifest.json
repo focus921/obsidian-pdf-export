@@ -1,0 +1,10 @@
+{
+  "id": "pdf-export-mobile",
+  "name": "PDF Export (Mobile)",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Export your notes to PDF on mobile devices",
+  "author": "Derek",
+  "authorUrl": "https://github.com/focus921",
+  "isDesktopOnly": false
+}
