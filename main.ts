@@ -364,7 +364,7 @@ class PDFExportSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('PDF export settings')
+			.setName('PDF export')
 			.setHeading();
 
 		containerEl.createEl('p', {
